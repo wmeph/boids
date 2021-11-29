@@ -1,3 +1,5 @@
+
+use nannou::prelude::float::Float;
 use nannou::prelude::Rect;
 use nannou_conrod as ui;
 use nannou_conrod::prelude::*;
@@ -365,6 +367,7 @@ struct Model {
     ui: Ui,
     ids: Ids,
     world: World,
+    tick: bool
 }
 
 widget_ids! {
@@ -380,15 +383,6 @@ fn raw_window_event(app: &App, model: &mut Model, event: &ui::RawWindowEvent) {
 }
 
 fn model(app: &App) -> Model {
-    let mut boids = vec![];
-    for i in 0..100 {
-        boids.push(Boid {
-            id: i,
-            velocity: (i as f32 * 10.0, i as f32),
-            position: (i as f32, i as f32),
-        })
-    }
-
     // Calling `set_widgets` allows us to instantiate some widgets.
     // Create a window.
     let w_id = app
@@ -406,10 +400,13 @@ fn model(app: &App) -> Model {
         ids,
         ui,
         world: World::new(app.window_rect()),
+        tick: true
     }
 }
 
 fn update(app: &App, model: &mut Model, _update: Update) {
+
+
     // Calling `set_widgets` allows us to instantiate some widgets.
     let ui = &mut model.ui.set_widgets();
     let boundary = app.window_rect();
@@ -431,7 +428,15 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     {
         model.world.separation = value;
     }
-
+    
+    for value in slider(model.world.cohesion, 0.0, 10.0)
+        .down(10.0)
+        .label(format!("Cohesion {}", model.world.cohesion).as_str())
+        .set(model.ids.cohesion, ui)
+    {
+        model.world.cohesion = value;
+    }
+    
     model.world.move_all_boids_to_new_positions();
 }
 
@@ -440,24 +445,19 @@ fn view(app: &App, model: &Model, frame: Frame) {
     let draw = app.draw();
 
 
-    // Get boundary of the window (to constrain the movements of our circle)
-    let boundary = app.window_rect();
-
-    // Map the sine wave functions to ranges between the boundaries of the window
-//    let mut x = map_range(sine, -1.0, 1.0, boundary.left(), boundary.right());
-//    let mut y = map_range(slowersine, -1.0, 1.0, boundary.bottom(), boundary.top());
-
     // Clear the background to purple.
     draw.background().color(PLUM);
 
-    // Draw a blue ellipse at the x/y coordinates 0.0, 0.0
-
-    for i in 0..100 {
+    // Draw the Boids
+    for i in 0..model.world.boids_count_f32() as usize {
         let b = &model.world.boids[i];
 
-        draw.ellipse()
+        let angle = b.velocity.1.atan2(b.velocity.0);
+
+        draw.tri()
             .color(STEELBLUE)
-            .radius(5.0)
+            .points((0.0,-15.0),(0.0,15.0), (15.0,0.0) )
+            .rotate(angle)
             .x_y(b.position.0, b.position.1);
     }
 
@@ -518,17 +518,17 @@ impl Boid {
     //	END PROCEDURE
     //Here of course the value 10 is an arbitrary amount to encourage them to fly in a particular direction.
     fn bound_position(&mut self, boundary: &Rect) {
-        if self.position.0 < boundary.left() {
-            self.velocity.0 += 10.0;
+        if self.velocity.0 + self.position.0 < boundary.left() + 100.0 {
+            self.velocity.0 -= self.velocity.0 * 0.5;
         }
-        if self.position.0 > boundary.right() {
-            self.velocity.0 -= 10.0;
+        if self.velocity.0 + self.position.0 > boundary.right() - 100.0 {
+            self.velocity.0 -= self.velocity.0 * 0.5;
         }
-        if self.position.1 < boundary.bottom() {
-            self.velocity.1 += 10.0;
+        if self.velocity.1 + self.position.1 < boundary.bottom() + 100.0 {
+            self.velocity.1 -= self.velocity.1 * 0.5;
         }
-        if self.position.1 > boundary.top() {
-            self.velocity.1 -= 10.0;
+        if self.velocity.1 + self.position.1 > boundary.top() - 100.0 {
+            self.velocity.1 -= self.velocity.1 * 0.5;
         }
     }
 }
@@ -546,10 +546,10 @@ fn draw_boids() {}
 impl World {
     fn new(boundary: nannou::prelude::Rect) -> Self {
         let mut boids = vec![];
-        for i in 0..100 {
+        for i in 0..30 {
             boids.push(Boid {
                 id: i,
-                velocity: (i as f32 * 10.0, i as f32),
+                velocity: (i as f32 * random::<f32>() * 0.01, i as f32 *random::<f32>() * 0.01),
                 position: (i as f32, i as f32),
             })
         }
@@ -560,6 +560,10 @@ impl World {
             cohesion: 1.0,
             boundary
         }
+    }
+
+    fn boids_count_f32(&self) -> f32 {
+        self.boids.len() as f32
     }
 
     //The procedure I have called move_all_boids_to_new_positions() contains the actual boids algorithm. Note that all it involves is simple vector operations on the positions of the boids. Each of the boids rules works independently, so, for each boid, you calculate how much it will get moved by each of the three rules, giving you three velocity vectors. Then you add those three vectors to the boid's current velocity to work out its new velocity. Interpreting the velocity as how far the boid moves per time step we simply add it to the current position, arriving at the following pseudo-code:
@@ -580,21 +584,20 @@ impl World {
     //
     //	END PROCEDURE
     fn move_all_boids_to_new_positions(&mut self) {
-        let mut v1: Vector = (0.0, 0.0);
-        let mut v2: Vector = (0.0, 0.0);
-        let mut v3: Vector = (0.0, 0.0);
 
         for i in 0..self.boids.len() {
-            v1 = self.rule1(i);
-            v2 = self.rule2(i);
-            v3 = self.rule3(i);
+            let mut v1 = self.rule1(i);
+            let mut v2 = self.rule2(i);
+            let mut v3 = self.rule3(i);
 
             //let mut boid = self.boids.remove(i);
             let b = &mut self.boids[i];
             b.bound_position(&self.boundary);
 
             b.velocity = add(add(add(b.velocity, v1), v2), v3);
-            b.position = add(b.position, b.velocity);
+
+
+            b.position = add(b.position, multiply(b.velocity, 0.05));
         }
     }
 
@@ -638,9 +641,9 @@ impl World {
                 pcJ = add(pcJ, b.position);
             }
         }
-        pcJ = divide(pcJ, 99.0);
         pcJ = multiply(pcJ, self.cohesion);
-        divide(subtract(pcJ, bJ.position), 100.0)
+        pcJ = divide(pcJ, self.boids_count_f32() - 1.0);
+        divide(subtract(pcJ, bJ.position), self.boids_count_f32())
     }
 
     //Rule 2: Boids try to keep a small distance away from other objects (including other boids).
@@ -669,7 +672,7 @@ impl World {
         let bJ = &self.boids[i];
         for b in &self.boids {
             if b != bJ {
-                if magnitude(subtract(b.position, bJ.position)) < self.separation {
+                if magnitude(subtract(b.position, bJ.position)) < self.separation * 15.0 {
                     c = subtract(c, (subtract(b.position, bJ.position)));
                 }
             }
@@ -688,7 +691,7 @@ impl World {
     //		FOR EACH BOID b
     //			IF b != bJ THEN
     //				pvJ = pvJ + b.velocity
-    //			END IF
+    //			END IFg
     //		END
     //
     //		pvJ = pvJ / N-1
@@ -701,7 +704,7 @@ impl World {
         let bJ = &self.boids[i];
         for b in &self.boids {
             if b != bJ {
-                add(pvJ, b.velocity);
+                pvJ = add(pvJ, b.velocity);
             }
         }
         pvJ = divide(pvJ, (self.boids.len() - 1) as f32);
