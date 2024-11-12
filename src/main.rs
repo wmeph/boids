@@ -1,4 +1,3 @@
-
 use nannou::prelude::float::Float;
 use nannou::prelude::Rect;
 use nannou_conrod as ui;
@@ -367,7 +366,7 @@ struct Model {
     ui: Ui,
     ids: Ids,
     world: World,
-    tick: bool
+    tick: bool,
 }
 
 widget_ids! {
@@ -387,6 +386,7 @@ fn model(app: &App) -> Model {
     // Create a window.
     let w_id = app
         .new_window()
+        .visible(true)
         .raw_event(raw_window_event)
         .view(view)
         .build()
@@ -400,13 +400,11 @@ fn model(app: &App) -> Model {
         ids,
         ui,
         world: World::new(app.window_rect()),
-        tick: true
+        tick: true,
     }
 }
 
 fn update(app: &App, model: &mut Model, _update: Update) {
-
-
     // Calling `set_widgets` allows us to instantiate some widgets.
     let ui = &mut model.ui.set_widgets();
     let boundary = app.window_rect();
@@ -419,31 +417,39 @@ fn update(app: &App, model: &mut Model, _update: Update) {
             .rgb(0.3, 0.3, 0.3)
             .label_rgb(1.0, 1.0, 1.0)
             .border(0.0)
+            .x(0.0)
     }
 
-    for value in slider(model.world.separation, 0.0, 10.0)
+    for value in slider(model.world.separation, 0.0, 2.0)
         .top_left_with_margin(20.0)
         .label(format!("Separation {}", model.world.separation).as_str())
         .set(model.ids.separation, ui)
     {
         model.world.separation = value;
     }
-    
-    for value in slider(model.world.cohesion, 0.0, 10.0)
+
+    for value in slider(model.world.cohesion, 0.0, 1.0)
         .down(10.0)
         .label(format!("Cohesion {}", model.world.cohesion).as_str())
         .set(model.ids.cohesion, ui)
     {
         model.world.cohesion = value;
     }
-    
+
+    for value in slider(model.world.alignment, 0.0, 2.0)
+        .down(10.0)
+        .label(format!("Alignment {}", model.world.alignment).as_str())
+        .set(model.ids.alignment, ui)
+    {
+        model.world.alignment = value;
+    }
+
     model.world.move_all_boids_to_new_positions();
 }
 
 fn view(app: &App, model: &Model, frame: Frame) {
     // Prepare to draw.
     let draw = app.draw();
-
 
     // Clear the background to purple.
     draw.background().color(PLUM);
@@ -456,7 +462,7 @@ fn view(app: &App, model: &Model, frame: Frame) {
 
         draw.tri()
             .color(STEELBLUE)
-            .points((0.0,-15.0),(0.0,15.0), (15.0,0.0) )
+            .points((0.0, -15.0), (0.0, 15.0), (15.0, 0.0))
             .rotate(angle)
             .x_y(b.position.0, b.position.1);
     }
@@ -476,7 +482,7 @@ struct World {
     separation: f32,
     alignment: f32,
     cohesion: f32,
-    boundary: nannou::prelude::Rect
+    boundary: nannou::prelude::Rect,
 }
 
 struct Boid {
@@ -546,10 +552,13 @@ fn draw_boids() {}
 impl World {
     fn new(boundary: nannou::prelude::Rect) -> Self {
         let mut boids = vec![];
-        for i in 0..30 {
+        for i in 0..100 {
             boids.push(Boid {
                 id: i,
-                velocity: (i as f32 * random::<f32>() * 0.01, i as f32 *random::<f32>() * 0.01),
+                velocity: (
+                    (i as f32 * random::<f32>() - 0.5) * 0.02,
+                    (i as f32 * random::<f32>() - 0.5) * 0.02,
+                ),
                 position: (i as f32, i as f32),
             })
         }
@@ -558,7 +567,7 @@ impl World {
             separation: 1.0,
             alignment: 1.0,
             cohesion: 1.0,
-            boundary
+            boundary,
         }
     }
 
@@ -584,18 +593,16 @@ impl World {
     //
     //	END PROCEDURE
     fn move_all_boids_to_new_positions(&mut self) {
-
         for i in 0..self.boids.len() {
-            let mut v1 = self.rule1(i);
-            let mut v2 = self.rule2(i);
-            let mut v3 = self.rule3(i);
+            let v1 = self.rule1(i);
+            let v2 = self.rule2(i);
+            let v3 = self.rule3(i);
 
             //let mut boid = self.boids.remove(i);
             let b = &mut self.boids[i];
             b.bound_position(&self.boundary);
 
             b.velocity = add(add(add(b.velocity, v1), v2), v3);
-
 
             b.position = add(b.position, multiply(b.velocity, 0.05));
         }
@@ -673,7 +680,7 @@ impl World {
         for b in &self.boids {
             if b != bJ {
                 if magnitude(subtract(b.position, bJ.position)) < self.separation * 15.0 {
-                    c = subtract(c, (subtract(b.position, bJ.position)));
+                    c = subtract(c, subtract(b.position, bJ.position));
                 }
             }
         }
@@ -708,10 +715,8 @@ impl World {
             }
         }
         pvJ = divide(pvJ, (self.boids.len() - 1) as f32);
-        divide(subtract(pvJ, bJ.velocity), 8.0)
+        divide(subtract(pvJ, bJ.velocity), 8.0 / self.alignment)
     }
-
-
 }
 
 fn add(mut v1: Vector, v2: Vector) -> Vector {
